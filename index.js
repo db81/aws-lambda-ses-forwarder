@@ -327,6 +327,34 @@ exports.sendMessage = function(data) {
 };
 
 /**
+ * Filters out SPAM emails
+ *
+ * @param {object} event - Lambda event from inbound email received by AWS SES.
+ *
+ * @return {boolean} - true if classified as spam
+ */
+exports.filterSpam = function(event) {
+  if(!event ||
+    !event.Records ||
+    event.Records.length != 1 ||
+    !event.Records[0].ses) return false;
+
+  const receipt = event.Records[0].ses.receipt;
+  if(!receipt) return false;
+
+  const verdicts = ['spamVerdict', 'virusVerdict', 'spfVerdict', 'dkimVerdict', 'dmarcVerdict'];
+  for(let key of verdicts) {
+    const verdict = receipt[key];
+    if(verdict && verdict.status === 'FAIL') {
+      console.log({level: "info", message: `rejected by spam filter; ${key} = ${verdict.status}`});
+      return true;
+    }
+  }
+      
+  return false;
+};
+
+/**
  * Handler function to be invoked by AWS Lambda with an inbound SES email as
  * the event.
  *
@@ -337,6 +365,13 @@ exports.sendMessage = function(data) {
  * configuration, SES object, and S3 object.
  */
 exports.handler = function(event, context, callback, overrides) {
+
+  // Added spam filter - see https://github.com/arithmetric/aws-lambda-ses-forwarder/issues/99
+  if(exports.filterSpam(event)) {
+    callback();
+    return;
+  }
+
   var steps = overrides && overrides.steps ? overrides.steps :
     [
       exports.parseEvent,
